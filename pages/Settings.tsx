@@ -98,7 +98,7 @@ export default function Settings() {
                     <Instagram className="text-pink-600 mb-1 group-hover:scale-110 transition-transform" size={24} />
                     <span className="text-xs font-bold text-pink-700 dark:text-pink-400">Instagram</span>
                 </a>
-                <a href="https://github.com/codemailpython0" target="_blank" rel="noreferrer" className="flex flex-col items-center justify-center p-3 bg-slate-100 dark:bg-slate-800 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors group">
+                <a href="https://github.com/kiran-devhub" target="_blank" rel="noreferrer" className="flex flex-col items-center justify-center p-3 bg-slate-100 dark:bg-slate-800 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors group">
                     <Github className="text-slate-700 dark:text-slate-300 mb-1 group-hover:scale-110 transition-transform" size={24} />
                     <span className="text-xs font-bold text-slate-700 dark:text-slate-300">GitHub</span>
                 </a>
