@@ -1,617 +1,661 @@
 
-import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { NavLink } from 'react-router-dom';
-import { useApp, BasicAddForm } from '../App';
-import { formatINR, AccountType, CATEGORIES, Transaction } from '../types';
-import { TrendingUp, TrendingDown, Bell, CreditCard, Wallet, Smartphone, RefreshCcw, Sun, Moon, Banknote, Landmark, Pencil, Check, Trash2, X, Plus, ChevronRight, ArrowRightLeft, Coins } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
+import React, { Component, useState, useEffect, useRef, createContext, useContext, ReactNode, FormEvent } from 'react';
+import { HashRouter, Routes, Route, NavLink } from 'react-router-dom';
+import { LayoutDashboard, Wallet, PlusCircle, PieChart, Settings as SettingsIcon, AlertTriangle, ArrowRightLeft, MoreHorizontal, Landmark, Smartphone, CreditCard, Banknote, Trash2, Plus, X } from 'lucide-react';
+import { Transaction, Account, AccountType, TransactionType, CATEGORIES, AppNotification } from './types';
+import * as Storage from './services/storageService';
+import Dashboard from './pages/Dashboard';
+import Transactions from './pages/Transactions';
+import Reports from './pages/Reports';
+import Settings from './pages/Settings';
 
-export default function Dashboard() {
-  const { 
-    transactions, 
-    accounts, 
-    isDarkMode, 
-    toggleTheme, 
-    userName, 
-    updateUserName, 
-    updateAccountName, 
-    createAccount, 
-    removeAccount, 
-    notifications, 
-    markNotificationsAsRead, 
-    clearAllNotifications,
-    deleteTransaction
-  } = useApp();
+// --- Error Boundary ---
+interface ErrorBoundaryProps {
+  children?: ReactNode;
+}
 
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [tempName, setTempName] = useState(userName);
-  const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
-  const [tempAccountName, setTempAccountName] = useState('');
-  
-  // UI State for Overlays
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [showAccountsModal, setShowAccountsModal] = useState(false);
-  const [isAddingAccount, setIsAddingAccount] = useState(false);
-  const [editingTx, setEditingTx] = useState<Transaction | null>(null);
-  
-  // New Account Form State
-  const [newAccName, setNewAccName] = useState('');
-  const [newAccType, setNewAccType] = useState<AccountType>(AccountType.BANK);
-  const [newAccBalance, setNewAccBalance] = useState('');
+interface ErrorBoundaryState {
+  hasError: boolean;
+}
 
-  const nameInputRef = useRef<HTMLInputElement>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const notificationRef = useRef<HTMLDivElement>(null);
+// Fixed GlobalErrorBoundary to resolve Property 'state' and 'props' does not exist errors by extending React.Component explicitly
+class GlobalErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  public state: ErrorBoundaryState = { hasError: false };
 
-  const unreadCount = notifications.filter(n => !n.read).length;
-
-  useEffect(() => {
-    if (isEditingName && nameInputRef.current) {
-      nameInputRef.current.focus();
-    }
-  }, [isEditingName]);
-
-  // Handle horizontal scroll with mouse wheel for accounts
-  useEffect(() => {
-      const el = scrollContainerRef.current;
-      if (el) {
-          const onWheel = (e: WheelEvent) => {
-              if (e.deltaY !== 0) {
-                  e.preventDefault();
-                  el.scrollLeft += e.deltaY;
-              }
-          };
-          el.addEventListener('wheel', onWheel, { passive: false });
-          return () => el.removeEventListener('wheel', onWheel);
-      }
-  }, []);
-
-  // Handle outside click for notifications
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (notificationRef.current && !notificationRef.current.contains(event.target as Node)) {
-        setShowNotifications(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [notificationRef]);
-
-  // Calculations for Overview
-  const now = new Date();
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
-
-  const thisMonthExpenses = useMemo(() => {
-    return transactions
-      .filter(t => {
-        const d = new Date(t.date);
-        return t.type === 'EXPENSE' && d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-      })
-      .reduce((sum, t) => sum + t.amount, 0);
-  }, [transactions, currentMonth, currentYear]);
-
-  const totalIncome = transactions
-    .filter(t => t.type === 'INCOME' || t.type === 'REFUND')
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const totalExpense = transactions
-    .filter(t => t.type === 'EXPENSE')
-    .reduce((sum, t) => sum + t.amount, 0);
-    
-  const totalBalance = accounts.reduce((sum, acc) => sum + acc.balance, 0);
-
-  // Month-wise spending breakdown (Last 6 months)
-  const monthlyData = useMemo(() => {
-    const data = [];
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date();
-      d.setMonth(d.getMonth() - i);
-      const m = d.getMonth();
-      const y = d.getFullYear();
-      const monthName = d.toLocaleString('default', { month: 'short' });
-      
-      const monthlyTotal = transactions
-        .filter(t => {
-          const td = new Date(t.date);
-          return t.type === 'EXPENSE' && td.getMonth() === m && td.getFullYear() === y;
-        })
-        .reduce((sum, t) => sum + t.amount, 0);
-        
-      data.push({ name: monthName, expense: monthlyTotal });
-    }
-    return data;
-  }, [transactions]);
-
-  // Category Pie Chart Data
-  const expensesByCategory = useMemo(() => {
-    return transactions
-      .filter(t => t.type === 'EXPENSE')
-      .reduce((acc, t) => {
-        acc[t.category] = (acc[t.category] || 0) + t.amount;
-        return acc;
-      }, {} as Record<string, number>);
-  }, [transactions]);
-
-  const pieData = useMemo(() => {
-    return Object.keys(expensesByCategory).map(cat => ({
-      name: cat,
-      value: expensesByCategory[cat],
-      color: CATEGORIES.find(c => c.name === cat)?.color || '#cbd5e1'
-    })).sort((a, b) => b.value - a.value).slice(0, 5);
-  }, [expensesByCategory]);
-
-  const recentTransactions = useMemo(() => {
-    return [...transactions]
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-      .slice(0, 5);
-  }, [transactions]);
-
-  const handleSaveName = () => {
-    if (tempName.trim()) {
-      updateUserName(tempName);
-    }
-    setIsEditingName(false);
-  };
-
-  const startEditingAccount = (id: string, currentName: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setEditingAccountId(id);
-    setTempAccountName(currentName);
-  };
-
-  const saveAccountName = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (tempAccountName.trim()) {
-      updateAccountName(id, tempAccountName);
-    }
-    setEditingAccountId(null);
-  };
-
-  const handleDeleteAccount = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (window.confirm('Are you sure you want to delete this account?')) {
-      removeAccount(id);
-    }
-  };
-
-  const handleAddAccount = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newAccName && newAccBalance) {
-        createAccount({
-            name: newAccName,
-            type: newAccType,
-            balance: parseFloat(newAccBalance)
-        });
-        setNewAccName('');
-        setNewAccBalance('');
-        setIsAddingAccount(false);
-    }
-  };
-
-  const getAccountIcon = (type: AccountType) => {
-    switch (type) {
-        case AccountType.BANK: return <Landmark size={24} className="text-white" />;
-        case AccountType.UPI: return <Smartphone size={24} className="text-white" />;
-        case AccountType.WALLET: return <Wallet size={24} className="text-white" />;
-        case AccountType.CASH: return <Banknote size={24} className="text-white" />;
-        case AccountType.CREDIT_CARD: 
-        case AccountType.DEBIT_CARD:
-            return <CreditCard size={24} className="text-white" />;
-        default: return <Wallet size={24} className="text-white" />;
-    }
-  };
-
-  const timeAgo = (dateStr: string) => {
-      const diff = Date.now() - new Date(dateStr).getTime();
-      const mins = Math.floor(diff / 60000);
-      if (mins < 1) return 'Just now';
-      if (mins < 60) return `${mins} mins ago`;
-      const hours = Math.floor(mins / 60);
-      if (hours < 24) return `${hours} hours ago`;
-      return 'Yesterday';
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
   }
 
-  return (
-    <div className="pb-24 pt-8 px-6 relative min-h-screen bg-slate-50 dark:bg-slate-950 transition-colors duration-200">
-      
-      {/* Header */}
-      <div className="flex justify-between items-start mb-8">
-        <div>
-          {isEditingName ? (
-            <div className="flex items-center gap-2">
-              <input 
-                ref={nameInputRef}
-                type="text" 
-                value={tempName} 
-                onChange={(e) => setTempName(e.target.value)}
-                onBlur={handleSaveName}
-                onKeyDown={(e) => e.key === 'Enter' && handleSaveName()}
-                className="text-2xl font-bold text-slate-800 dark:text-white bg-transparent border-b-2 border-indigo-500 outline-none w-48"
-              />
-              <button onClick={handleSaveName} className="text-indigo-600"><Check size={20}/></button>
-            </div>
-          ) : (
-            <h1 className="text-2xl font-bold text-slate-800 dark:text-white flex items-center gap-2 group cursor-pointer" onClick={() => setIsEditingName(true)}>
-              Hello, {userName} <Pencil size={14} className="opacity-0 group-hover:opacity-50 transition-opacity text-slate-400"/>
-            </h1>
-          )}
-          <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">Total Balance: <span className="font-bold text-slate-800 dark:text-slate-200">{formatINR(totalBalance)}</span></p>
-        </div>
-        <div className="flex gap-3">
-            <button onClick={toggleTheme} className="p-3 bg-white dark:bg-slate-900 rounded-full shadow-sm text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
-                {isDarkMode ? <Moon size={20} /> : <Sun size={20} />}
+  static getDerivedStateFromError(_error: any): ErrorBoundaryState {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error("App Crash:", error, errorInfo);
+  }
+
+  handleReset = () => {
+    if (window.confirm("This will clear all local data to fix the bottom crash. Are you sure?")) {
+      localStorage.clear();
+      window.location.reload();
+    }
+  }
+
+  render() {
+    // Correctly accessing state property from React.Component
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50 text-center">
+          <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-4">
+            <AlertTriangle size={32} />
+          </div>
+          <h2 className="text-xl font-bold text-slate-800 mb-2">Something went wrong</h2>
+          <p className="text-slate-500 mb-6 max-w-xs">The app encountered an unexpected error. Please try reloading.</p>
+          <div className="flex gap-3">
+            <button 
+              onClick={() => window.location.reload()} 
+              className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-lg active:scale-95 transition-transform"
+            >
+              Reload App
             </button>
-            <div className="relative" ref={notificationRef}>
-                <button onClick={() => setShowNotifications(!showNotifications)} className="p-3 bg-white dark:bg-slate-900 rounded-full shadow-sm text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors relative">
-                    <Bell size={20} />
-                    {unreadCount > 0 && (
-                        <span className="absolute top-2 right-2.5 w-2 h-2 bg-red-500 rounded-full border border-white dark:border-slate-900 animate-pulse"></span>
-                    )}
-                </button>
-                {showNotifications && (
-                    <div className="absolute right-0 top-14 w-80 bg-white dark:bg-slate-900 shadow-xl rounded-2xl p-4 z-50 border border-slate-100 dark:border-slate-800 animate-in fade-in slide-in-from-top-2">
-                        <div className="flex justify-between items-center mb-4">
-                            <h4 className="font-bold text-slate-800 dark:text-white text-sm">Notifications</h4>
-                            {notifications.length > 0 && (
-                                <button onClick={clearAllNotifications} className="text-[10px] text-slate-400 hover:text-red-500">Clear All</button>
-                            )}
-                        </div>
-                        <div className="space-y-3 max-h-[300px] overflow-y-auto no-scrollbar">
-                            {notifications.length === 0 ? (
-                                <p className="text-xs text-slate-400 text-center py-4">No new notifications</p>
-                            ) : (
-                                notifications.map(notif => (
-                                    <div key={notif.id} className={`flex gap-3 items-start p-2 rounded-lg transition-colors ${!notif.read ? 'bg-indigo-50 dark:bg-indigo-900/10' : ''}`}>
-                                        <div className={`w-2 h-2 mt-1.5 rounded-full shrink-0 ${notif.type === 'success' ? 'bg-emerald-500' : notif.type === 'warning' ? 'bg-red-500' : 'bg-indigo-500'}`}></div>
-                                        <div>
-                                            <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">{notif.title}</p>
-                                            <p className="text-xs text-slate-600 dark:text-slate-400 leading-tight">{notif.message}</p>
-                                            <p className="text-[10px] text-slate-400 mt-1">{timeAgo(notif.date)}</p>
-                                        </div>
-                                    </div>
-                                ))
-                            )}
-                        </div>
-                    </div>
-                )}
-            </div>
-        </div>
-      </div>
-
-      {/* Main Expense Highlights */}
-      <div className="grid grid-cols-1 gap-4 mb-8">
-        <div className="bg-indigo-600 dark:bg-indigo-700 p-6 rounded-3xl shadow-glow text-white relative overflow-hidden group">
-           <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-10 -mt-10 blur-3xl transition-transform group-hover:scale-110"></div>
-           <div className="relative z-10 flex justify-between items-center">
-              <div>
-                 <p className="text-indigo-100 text-xs font-bold uppercase tracking-wider mb-1">Expenses This Month</p>
-                 <h2 className="text-3xl font-bold">{formatINR(thisMonthExpenses)}</h2>
-              </div>
-              <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center">
-                 <TrendingDown size={28} />
-              </div>
-           </div>
-           <div className="mt-4 flex items-center gap-2 text-[10px] font-medium text-indigo-100">
-              <span className="bg-white/20 px-2 py-0.5 rounded-full">Overall: {formatINR(totalExpense)}</span>
-              <span>•</span>
-              <span>Financial Insight Active</span>
-           </div>
-        </div>
-      </div>
-
-      {/* Income & Expense Breakdown Row */}
-      <div className="grid grid-cols-2 gap-4 mb-8">
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl shadow-soft dark:shadow-none dark:border dark:border-slate-800 relative overflow-hidden group">
-          <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-50 dark:bg-emerald-900/20 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110"></div>
-          <div className="relative z-10">
-            <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/40 rounded-full flex items-center justify-center text-emerald-600 dark:text-emerald-400 mb-3">
-              <TrendingUp size={20} />
-            </div>
-            <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Income & Refunds</p>
-            <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{formatINR(totalIncome)}</p>
+            <button 
+              onClick={this.handleReset}
+              className="px-6 py-3 bg-white text-slate-600 border border-slate-200 rounded-xl font-bold shadow-sm active:scale-95 transition-transform"
+            >
+              Reset Data
+            </button>
           </div>
         </div>
+      );
+    }
+    // Correctly accessing props property inherited from React.Component
+    return this.props.children;
+  }
+}
 
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl shadow-soft dark:shadow-none dark:border dark:border-slate-800 relative overflow-hidden group">
-          <div className="absolute top-0 right-0 w-20 h-20 bg-rose-50 dark:bg-rose-900/20 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110"></div>
-          <div className="relative z-10">
-            <div className="w-10 h-10 bg-rose-100 dark:bg-rose-900/40 rounded-full flex items-center justify-center text-rose-600 dark:text-rose-400 mb-3">
-              <TrendingDown size={20} />
-            </div>
-            <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Total Expense</p>
-            <p className="text-lg font-bold text-rose-600 dark:text-rose-400">{formatINR(totalExpense)}</p>
-          </div>
-        </div>
-      </div>
+// --- Context ---
+export interface AppContextType {
+  transactions: Transaction[];
+  accounts: Account[];
+  notifications: AppNotification[];
+  addTransaction: (t: Omit<Transaction, 'id'>) => void;
+  updateTransaction: (t: Transaction) => void;
+  deleteTransaction: (id: string) => Transaction | null;
+  refreshData: () => void;
+  isDarkMode: boolean;
+  toggleTheme: () => void;
+  userName: string;
+  updateUserName: (name: string) => void;
+  updateAccountName: (id: string, name: string) => void;
+  createAccount: (account: Omit<Account, 'id'>) => void;
+  removeAccount: (id: string) => void;
+  markNotificationsAsRead: () => void;
+  clearAllNotifications: () => void;
+}
 
-      {/* Accounts Section */}
-      <div className="mb-8">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-bold text-slate-800 dark:text-white">My Accounts</h2>
-          <button onClick={() => setShowAccountsModal(true)} className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700">See All</button>
-        </div>
-        
-        <div 
-            ref={scrollContainerRef}
-            className="flex gap-4 overflow-x-auto no-scrollbar pb-2 cursor-grab active:cursor-grabbing"
-            style={{ scrollBehavior: 'smooth' }}
-        >
-          {accounts.map(acc => (
-            <div key={acc.id} className="min-w-[280px] h-40 bg-slate-800 dark:bg-slate-900 rounded-3xl p-6 relative overflow-hidden shrink-0 shadow-lg group">
-               <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-10 -mt-10 blur-2xl"></div>
-               <div className="absolute bottom-0 left-0 w-24 h-24 bg-indigo-500/20 rounded-full -ml-10 -mb-10 blur-xl"></div>
-               
-               <div className="relative z-10 flex flex-col h-full justify-between text-white">
-                  <div className="flex justify-between items-start">
-                     <div className="w-10 h-10 bg-white/10 backdrop-blur-sm rounded-xl flex items-center justify-center">
-                        {getAccountIcon(acc.type)}
-                     </div>
-                     <div className="flex gap-1">
-                        <button onClick={(e) => startEditingAccount(acc.id, acc.name, e)} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
-                            <Pencil size={14} className="text-slate-300" />
-                        </button>
-                        <button onClick={(e) => handleDeleteAccount(acc.id, e)} className="p-1.5 hover:bg-red-500/20 hover:text-red-300 rounded-lg transition-colors">
-                            <Trash2 size={14} className="text-slate-300 hover:text-red-300" />
-                        </button>
-                     </div>
-                  </div>
-                  
-                  <div>
-                    {editingAccountId === acc.id ? (
-                        <div className="flex items-center gap-2 mb-1" onClick={e => e.stopPropagation()}>
-                            <input 
-                                type="text" 
-                                value={tempAccountName}
-                                onChange={e => setTempAccountName(e.target.value)}
-                                className="bg-white/10 text-white px-2 py-1 rounded text-sm w-full outline-none border border-white/20"
-                                autoFocus
-                            />
-                            <button onClick={(e) => saveAccountName(acc.id, e)} className="p-1 bg-green-500/80 rounded hover:bg-green-500"><Check size={12} /></button>
-                        </div>
-                    ) : (
-                        <p className="text-slate-300 text-sm font-medium mb-1">{acc.name}</p>
-                    )}
-                    <h3 className="text-2xl font-bold tracking-tight">{formatINR(acc.balance)}</h3>
-                  </div>
-               </div>
-            </div>
-          ))}
-          <div onClick={() => setShowAccountsModal(true)} className="min-w-[100px] h-40 flex items-center justify-center rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-800 text-slate-400 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors">
-            <Plus size={24} />
-          </div>
-        </div>
-      </div>
+const AppContext = createContext<AppContextType | undefined>(undefined);
 
-      {/* Spending Breakdown Section */}
-      <div className="space-y-6 mb-8">
-        {/* Category Pie Breakdown */}
-        <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl shadow-soft dark:shadow-none dark:border dark:border-slate-800 transition-colors">
-            <h2 className="text-lg font-bold text-slate-800 dark:text-white mb-6">Spending Breakdown</h2>
-            <div className="h-64 w-full relative">
-               <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                     <Pie
-                        data={pieData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={80}
-                        paddingAngle={5}
-                        dataKey="value"
-                        stroke="none"
-                     >
-                        {pieData.map((entry, index) => (
-                           <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                     </Pie>
-                     <Tooltip 
-                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)', backgroundColor: '#1e293b', color: '#fff' }}
-                        itemStyle={{ color: '#fff' }}
-                     />
-                  </PieChart>
-               </ResponsiveContainer>
-               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                  <span className="text-xs text-slate-400 font-medium">Top Category</span>
-                  <span className="text-sm font-bold text-slate-800 dark:text-white">{pieData[0]?.name || 'None'}</span>
-               </div>
-            </div>
-            
-            <div className="flex flex-wrap gap-4 mt-6 justify-center">
-                {pieData.map((entry, index) => (
-                    <div key={index} className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full" style={{ backgroundColor: entry.color }}></span>
-                        <span className="text-xs font-medium text-slate-600 dark:text-slate-400">{entry.name} ({Math.round(entry.value / totalExpense * 100 || 0)}%)</span>
-                    </div>
-                ))}
-            </div>
-        </div>
+export const useApp = () => {
+  const context = useContext(AppContext);
+  if (!context) throw new Error("useApp must be used within AppProvider");
+  return context;
+};
 
-        {/* Month-wise Spending Trend */}
-        <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl shadow-soft dark:shadow-none dark:border dark:border-slate-800 transition-colors">
-            <div className="flex justify-between items-center mb-6">
-                <h2 className="text-lg font-bold text-slate-800 dark:text-white">Monthly Trends</h2>
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Last 6 Months</span>
-            </div>
-            <div className="h-48 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={monthlyData}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.1)" />
-                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dy={10} />
-                        <YAxis hide />
-                        <Tooltip 
-                            cursor={{ fill: 'rgba(248, 250, 252, 0.1)' }}
-                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)', backgroundColor: '#1e293b', color: '#fff' }}
-                            labelStyle={{ color: '#fff' }}
-                        />
-                        <Bar dataKey="expense" fill="#6366f1" radius={[6, 6, 0, 0]} barSize={24} />
-                    </BarChart>
-                </ResponsiveContainer>
-            </div>
-        </div>
-      </div>
+// --- Main App Component ---
+export default function App() {
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(Storage.getTheme() === 'dark');
+  const [userName, setUserName] = useState<string>(Storage.getUserName());
 
-      {/* Recent Transactions with Edit/Delete */}
-      <div className="mb-8">
-        <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-bold text-slate-800 dark:text-white">Recent Transactions</h2>
-            <NavLink to="/transactions" className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700">View History</NavLink>
-        </div>
-        <div className="space-y-3">
-            {recentTransactions.map(t => (
-                <div key={t.id} className="bg-white dark:bg-slate-900 p-4 rounded-2xl shadow-sm border border-slate-50 dark:border-slate-800 flex justify-between items-center group relative overflow-hidden transition-colors">
-                    <div className="flex items-center gap-4 z-10">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg ${
-                            t.type === 'INCOME' || t.type === 'REFUND' ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' 
-                            : t.type === 'TRANSFER' ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                            : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                        }`}>
-                            {t.type === 'REFUND' && <RefreshCcw size={18}/>}
-                            {t.type === 'TRANSFER' && <ArrowRightLeft size={18}/>}
-                            {t.type !== 'REFUND' && t.type !== 'TRANSFER' && (
-                                <>
-                                    {CATEGORIES.find(c => c.name === t.category)?.icon === 'Utensils' && '🍽️'}
-                                    {CATEGORIES.find(c => c.name === t.category)?.icon === 'ShoppingBasket' && '🛒'}
-                                    {CATEGORIES.find(c => c.name === t.category)?.icon === 'Fuel' && '⛽'}
-                                    {CATEGORIES.find(c => c.name === t.category)?.icon === 'Coins' && <Coins size={18}/>}
-                                    {!['Utensils', 'ShoppingBasket', 'Fuel', 'Coins'].includes(CATEGORIES.find(c => c.name === t.category)?.icon || '') && '🧾'}
-                                </>
-                            )}
-                        </div>
-                        <div>
-                            <h4 className="font-bold text-slate-800 dark:text-slate-200 text-sm">{t.merchant || t.category}</h4>
-                            <p className="text-[10px] text-slate-400 dark:text-slate-500">{new Date(t.date).toLocaleDateString()} • {t.accountName}</p>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-3 z-10">
-                        <div className="text-right mr-2">
-                            <p className={`font-bold text-sm ${
-                                t.type === 'INCOME' || t.type === 'REFUND' ? 'text-income' 
-                                : t.type === 'TRANSFER' ? 'text-blue-600 dark:text-blue-400'
-                                : 'text-slate-800 dark:text-slate-200'
-                            }`}>
-                                {t.type === 'INCOME' || t.type === 'REFUND' ? '+' : t.type === 'TRANSFER' ? '' : '-'}{formatINR(t.amount)}
-                            </p>
-                        </div>
-                        
-                        {/* Inline Actions */}
-                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => setEditingTx(t)} className="p-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg text-slate-400 hover:text-indigo-600">
-                                <Pencil size={14} />
-                            </button>
-                            <button onClick={() => deleteTransaction(t.id)} className="p-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg text-slate-400 hover:text-red-500">
-                                <Trash2 size={14} />
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            ))}
-        </div>
-      </div>
+  const refreshData = () => {
+    const tx = Storage.getTransactions();
+    const acc = Storage.getAccounts();
+    const notifs = Storage.getNotifications();
+    setTransactions([...tx]);
+    setAccounts([...acc]);
+    setNotifications([...notifs]);
+  };
 
-      {/* Edit Modal for Dashboard Recent Transactions */}
-      {editingTx && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in">
-              <div className="bg-slate-50 dark:bg-slate-950 w-full max-w-lg rounded-3xl p-6 shadow-2xl relative animate-in zoom-in-95 overflow-y-auto max-h-[90vh] no-scrollbar">
-                  <div className="flex justify-between items-center mb-6">
-                      <h2 className="text-xl font-bold dark:text-white">Edit Transaction</h2>
-                      <button onClick={() => setEditingTx(null)} className="p-2 bg-white dark:bg-slate-900 rounded-full text-slate-400 hover:text-red-500">
-                          <X size={20} />
-                      </button>
-                  </div>
-                  <BasicAddForm initialData={editingTx} onComplete={() => setEditingTx(null)} />
-              </div>
-          </div>
-      )}
+  useEffect(() => {
+    refreshData();
+    const root = document.documentElement;
+    const metaTheme = document.querySelector('meta[name="theme-color"]');
+    
+    if (isDarkMode) {
+      root.classList.add('dark');
+      if (metaTheme) metaTheme.setAttribute('content', '#0f172a');
+    } else {
+      root.classList.remove('dark');
+      if (metaTheme) metaTheme.setAttribute('content', '#ffffff');
+    }
+  }, [isDarkMode]);
 
-      {/* All Accounts Modal */}
-      {showAccountsModal && (
-        <div className="fixed inset-0 bg-black/50 z-[60] flex items-end sm:items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
-            <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-3xl p-6 shadow-2xl animate-in slide-in-from-bottom-10">
-                <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-xl font-bold text-slate-800 dark:text-white">All Accounts</h2>
-                    <button onClick={() => { setShowAccountsModal(false); setIsAddingAccount(false); }} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full">
-                        <X size={20} className="text-slate-500" />
-                    </button>
+  const toggleTheme = () => {
+    const newTheme = !isDarkMode;
+    setIsDarkMode(newTheme);
+    Storage.saveTheme(newTheme ? 'dark' : 'light');
+  };
+
+  const notify = (title: string, message: string, type: 'success' | 'info' | 'warning' | 'error' = 'info') => {
+    const newNotif: AppNotification = {
+      id: crypto.randomUUID(),
+      title,
+      message,
+      type,
+      date: new Date().toISOString(),
+      read: false
+    };
+    Storage.addNotification(newNotif);
+    refreshData();
+  };
+
+  const markNotificationsAsRead = () => {
+    Storage.markNotificationsRead();
+    refreshData();
+  };
+
+  const clearAllNotifications = () => {
+    Storage.clearNotifications();
+    refreshData();
+  };
+
+  const updateUserName = (name: string) => {
+    setUserName(name);
+    Storage.saveUserName(name);
+  };
+
+  const updateAccountName = (id: string, name: string) => {
+    Storage.updateAccountName(id, name);
+    refreshData();
+  };
+
+  const createAccount = (account: Omit<Account, 'id'>) => {
+    const newAccount: Account = { ...account, id: crypto.randomUUID() };
+    Storage.saveAccount(newAccount);
+    notify('Account Created', `${account.name} added successfully.`, 'success');
+    refreshData();
+  };
+
+  const removeAccount = (id: string) => {
+    const acc = accounts.find(a => a.id === id);
+    Storage.deleteAccount(id);
+    notify('Account Deleted', `${acc?.name || 'Account'} has been removed.`, 'warning');
+    refreshData();
+  };
+
+  const addTransaction = (t: Omit<Transaction, 'id'>) => {
+    const newTransaction: Transaction = { ...t, id: crypto.randomUUID() };
+    Storage.saveTransaction(newTransaction);
+    
+    if (t.type === 'TRANSFER' && t.toAccountId) {
+      Storage.updateAccountBalance(t.accountId, -t.amount);
+      Storage.updateAccountBalance(t.toAccountId, t.amount);
+    } else {
+      let balanceChange = 0;
+      if (t.type === 'INCOME' || t.type === 'REFUND') balanceChange = t.amount;
+      else if (t.type === 'EXPENSE') balanceChange = -t.amount;
+      Storage.updateAccountBalance(t.accountId, balanceChange);
+    }
+
+    const amountFormatted = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(t.amount);
+    if (t.type === 'EXPENSE') {
+        notify('Expense Added', `Spent ${amountFormatted} at ${t.merchant || t.category}`, 'info');
+    } else if (t.type === 'INCOME') {
+        notify('Income Received', `Received ${amountFormatted} from ${t.merchant || t.category}`, 'success');
+    } else if (t.type === 'REFUND') {
+        notify('Refund Processed', `Refund of ${amountFormatted} added to ${t.accountName}`, 'success');
+    } else if (t.type === 'TRANSFER') {
+        notify('Transfer Successful', `Transferred ${amountFormatted} to ${t.toAccountName}`, 'success');
+    }
+
+    if (t.cashback && t.cashback > 0 && t.type === 'EXPENSE') {
+      const cashbackTx: Transaction = {
+        id: crypto.randomUUID(),
+        amount: t.cashback,
+        type: 'INCOME',
+        category: 'Cashback',
+        accountId: t.accountId,
+        accountName: t.accountName,
+        date: t.date,
+        note: `Cashback for ${t.merchant || t.category}`,
+        merchant: t.merchant
+      };
+      Storage.saveTransaction(cashbackTx);
+      Storage.updateAccountBalance(t.accountId, t.cashback);
+      notify('Cashback Earned!', `You earned ₹${t.cashback} cashback!`, 'success');
+    }
+    
+    refreshData();
+  };
+
+  const updateTransaction = (updatedTx: Transaction) => {
+    const oldTx = transactions.find(t => t.id === updatedTx.id);
+    if (!oldTx) return;
+
+    // 1. Reverse old impact
+    if (oldTx.type === 'TRANSFER' && oldTx.toAccountId) {
+      Storage.updateAccountBalance(oldTx.accountId, oldTx.amount);
+      Storage.updateAccountBalance(oldTx.toAccountId, -oldTx.amount);
+    } else {
+      let reverseChange = 0;
+      if (oldTx.type === 'INCOME' || oldTx.type === 'REFUND') reverseChange = -oldTx.amount;
+      else if (oldTx.type === 'EXPENSE') reverseChange = oldTx.amount;
+      Storage.updateAccountBalance(oldTx.accountId, reverseChange);
+    }
+
+    // 2. Apply new impact
+    if (updatedTx.type === 'TRANSFER' && updatedTx.toAccountId) {
+      Storage.updateAccountBalance(updatedTx.accountId, -updatedTx.amount);
+      Storage.updateAccountBalance(updatedTx.toAccountId, updatedTx.amount);
+    } else {
+      let newChange = 0;
+      if (updatedTx.type === 'INCOME' || updatedTx.type === 'REFUND') newChange = updatedTx.amount;
+      else if (updatedTx.type === 'EXPENSE') newChange = -updatedTx.amount;
+      Storage.updateAccountBalance(updatedTx.accountId, newChange);
+    }
+
+    Storage.updateTransaction(updatedTx);
+    notify('Transaction Updated', 'Changes saved successfully', 'success');
+    refreshData();
+  };
+
+  const deleteTransaction = (id: string): Transaction | null => {
+    const txToDelete = transactions.find(t => t.id === id);
+    if (!txToDelete) return null;
+    
+    setTransactions(prev => prev.filter(p => p.id !== id));
+
+    const deletedTx = Storage.deleteTransaction(id);
+    if (deletedTx) {
+      if (deletedTx.type === 'TRANSFER' && deletedTx.toAccountId) {
+        Storage.updateAccountBalance(deletedTx.accountId, deletedTx.amount);
+        Storage.updateAccountBalance(deletedTx.toAccountId, -deletedTx.amount);
+      } else {
+        let balanceChange = 0;
+        if (deletedTx.type === 'INCOME' || deletedTx.type === 'REFUND') balanceChange = -deletedTx.amount;
+        else if (deletedTx.type === 'EXPENSE') balanceChange = deletedTx.amount;
+        Storage.updateAccountBalance(deletedTx.accountId, balanceChange);
+      }
+      notify('Transaction Deleted', 'Transaction removed.', 'warning');
+    } 
+    refreshData();
+    return deletedTx;
+  };
+
+  return (
+    <GlobalErrorBoundary>
+      <HashRouter>
+        <AppContext.Provider value={{ 
+          transactions, 
+          accounts, 
+          notifications,
+          addTransaction, 
+          updateTransaction,
+          deleteTransaction, 
+          refreshData, 
+          isDarkMode, 
+          toggleTheme,
+          userName,
+          updateUserName,
+          updateAccountName,
+          createAccount,
+          removeAccount,
+          markNotificationsAsRead,
+          clearAllNotifications
+        }}>
+          <div className="flex flex-col h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans overflow-hidden transition-colors duration-200">
+            <main className="flex-1 overflow-y-auto pb-20 no-scrollbar">
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/transactions" element={<Transactions />} />
+                <Route path="/add" element={<AddTransactionPage />} />
+                <Route path="/reports" element={<Reports />} />
+                <Route path="/settings" element={<Settings />} />
+              </Routes>
+            </main>
+
+            <nav className="fixed bottom-0 w-full bg-white/90 dark:bg-slate-900/90 backdrop-blur-lg border-t border-slate-200 dark:border-slate-800 safe-area-bottom z-50">
+              <div className="flex justify-around items-center h-16 max-w-lg mx-auto px-2">
+                <NavLink to="/" className={({ isActive }) => `flex flex-col items-center justify-center w-16 h-16 space-y-1 transition-colors ${isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'}`}>
+                  <LayoutDashboard size={22} strokeWidth={2} />
+                  <span className="text-[10px] font-medium">Home</span>
+                </NavLink>
+                
+                <NavLink to="/transactions" className={({ isActive }) => `flex flex-col items-center justify-center w-16 h-16 space-y-1 transition-colors ${isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'}`}>
+                  <Wallet size={22} strokeWidth={2} />
+                  <span className="text-[10px] font-medium">History</span>
+                </NavLink>
+
+                <div className="-mt-8">
+                  <NavLink to="/add" className="flex items-center justify-center w-14 h-14 bg-indigo-600 dark:bg-indigo-500 rounded-full shadow-glow text-white shadow-lg transform active:scale-95 transition-all hover:bg-indigo-700 dark:hover:bg-indigo-400">
+                    <PlusCircle size={28} />
+                  </NavLink>
                 </div>
 
-                {!isAddingAccount ? (
-                    <div className="space-y-3 max-h-[60vh] overflow-y-auto no-scrollbar">
-                        {accounts.map(acc => (
-                            <div key={acc.id} className="flex justify-between items-center p-4 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700">
-                                <div className="flex items-center gap-4">
-                                    <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center text-indigo-600 dark:text-indigo-400">
-                                        {getAccountIcon(acc.type)}
-                                    </div>
-                                    <div>
-                                        <p className="font-bold text-slate-800 dark:text-white">{acc.name}</p>
-                                        <p className="text-xs text-slate-500 dark:text-slate-400 capitalize">{acc.type.replace('_', ' ')}</p>
-                                    </div>
-                                </div>
-                                <div className="text-right">
-                                    <p className="font-bold text-slate-800 dark:text-white">{formatINR(acc.balance)}</p>
-                                    <div className="flex gap-2 justify-end mt-1">
-                                        <button onClick={(e) => startEditingAccount(acc.id, acc.name, e)} className="text-indigo-500 text-xs font-bold">Edit</button>
-                                        <button onClick={(e) => handleDeleteAccount(acc.id, e)} className="text-red-500 text-xs font-bold">Delete</button>
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
-                        <button 
-                            onClick={() => setIsAddingAccount(true)}
-                            className="w-full py-4 rounded-xl border-2 border-dashed border-indigo-200 dark:border-indigo-900 text-indigo-500 font-bold flex items-center justify-center gap-2 hover:bg-indigo-50 dark:hover:bg-indigo-900/10 transition-colors"
-                        >
-                            <Plus size={20} /> Add New Account
-                        </button>
-                    </div>
-                ) : (
-                    <form onSubmit={handleAddAccount} className="space-y-4">
-                        <div>
-                            <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Account Name</label>
-                            <input 
-                                type="text" 
-                                value={newAccName} 
-                                onChange={e => setNewAccName(e.target.value)} 
-                                className="w-full p-4 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-white font-bold outline-none focus:ring-2 focus:ring-indigo-500" 
-                                placeholder="e.g. SBI Savings"
-                                required
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Account Type</label>
-                            <div className="grid grid-cols-3 gap-2">
-                                {[AccountType.BANK, AccountType.UPI, AccountType.CASH, AccountType.WALLET, AccountType.CREDIT_CARD, AccountType.DEBIT_CARD].map(type => (
-                                    <button
-                                        key={type}
-                                        type="button"
-                                        onClick={() => setNewAccType(type)}
-                                        className={`p-2 rounded-xl text-[10px] font-bold border transition-colors ${newAccType === type ? 'bg-indigo-500 border-indigo-500 text-white' : 'border-slate-200 dark:border-slate-700 text-slate-500'}`}
-                                    >
-                                        {type.replace('_', ' ')}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                        <div>
-                            <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Opening Balance</label>
-                            <input 
-                                type="number" 
-                                value={newAccBalance} 
-                                onChange={e => setNewAccBalance(e.target.value)} 
-                                className="w-full p-4 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-white font-bold outline-none focus:ring-2 focus:ring-indigo-500" 
-                                placeholder="0"
-                                required
-                            />
-                        </div>
-                        <div className="flex gap-3 pt-2">
-                            <button type="button" onClick={() => setIsAddingAccount(false)} className="flex-1 py-3 text-slate-500 font-bold bg-slate-100 dark:bg-slate-800 rounded-xl">Cancel</button>
-                            <button type="submit" className="flex-1 py-3 text-white font-bold bg-indigo-600 rounded-xl shadow-lg">Create Account</button>
-                        </div>
-                    </form>
-                )}
-            </div>
-        </div>
-      )}
-    </div>
+                <NavLink to="/reports" className={({ isActive }) => `flex flex-col items-center justify-center w-16 h-16 space-y-1 transition-colors ${isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'}`}>
+                  <PieChart size={22} strokeWidth={2} />
+                  <span className="text-[10px] font-medium">Analytics</span>
+                </NavLink>
+
+                <NavLink to="/settings" className={({ isActive }) => `flex flex-col items-center justify-center w-16 h-16 space-y-1 transition-colors ${isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'}`}>
+                  <SettingsIcon size={22} strokeWidth={2} />
+                  <span className="text-[10px] font-medium">Settings</span>
+                </NavLink>
+              </div>
+            </nav>
+          </div>
+        </AppContext.Provider>
+      </HashRouter>
+    </GlobalErrorBoundary>
   );
+}
+
+const AddTransactionPage = () => {
+  return (
+    <div className="p-4 pt-8 max-w-lg mx-auto">
+       <h1 className="text-2xl font-bold mb-6 text-slate-900 dark:text-white">Add Transaction</h1>
+       <BasicAddForm />
+    </div>
+  )
+}
+
+export const BasicAddForm = ({ initialData, onComplete }: { initialData?: Transaction, onComplete?: () => void }) => {
+    const { addTransaction, updateTransaction, accounts } = useApp();
+    const [amount, setAmount] = useState(initialData?.amount.toString() || '');
+    const [note, setNote] = useState(initialData?.merchant || initialData?.note || '');
+    const [date, setDate] = useState(initialData ? initialData.date.split('T')[0] : new Date().toISOString().split('T')[0]);
+    const [type, setType] = useState<TransactionType>(initialData?.type || 'EXPENSE');
+    const [category, setCategory] = useState(initialData?.category || CATEGORIES[0].name);
+    const [selectedAccountId, setSelectedAccountId] = useState(initialData?.accountId || '');
+    const [toAccountId, setToAccountId] = useState(initialData?.toAccountId || '');
+    const [cashback, setCashback] = useState(initialData?.cashback?.toString() || '');
+    
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [success, setSuccess] = useState(false);
+    const accountScrollRef = useRef<HTMLDivElement>(null);
+    const toAccountScrollRef = useRef<HTMLDivElement>(null);
+
+    // Mouse wheel horizontal scroll support
+    useEffect(() => {
+        const handleWheel = (el: HTMLDivElement | null) => {
+            if (!el) return;
+            const onWheel = (e: WheelEvent) => {
+                if (e.deltaY !== 0) {
+                    e.preventDefault();
+                    el.scrollLeft += e.deltaY;
+                }
+            };
+            el.addEventListener('wheel', onWheel, { passive: false });
+            return () => el.removeEventListener('wheel', onWheel);
+        };
+        
+        const cleanupAccount = handleWheel(accountScrollRef.current);
+        const cleanupToAccount = handleWheel(toAccountScrollRef.current);
+        
+        return () => {
+            if (cleanupAccount) cleanupAccount();
+            if (cleanupToAccount) cleanupToAccount();
+        };
+    }, [type]);
+
+    useEffect(() => {
+      if (accounts.length > 0 && !selectedAccountId) {
+          setSelectedAccountId(accounts[0].id);
+          if (!toAccountId && accounts.length > 1) {
+              const dest = accounts.find(a => a.id !== accounts[0].id);
+              if (dest) setToAccountId(dest.id);
+          }
+      }
+    }, [accounts, selectedAccountId, toAccountId]);
+
+    const handleSubmit = (e: FormEvent) => {
+        e.preventDefault();
+        const acc = accounts.find(a => a.id === selectedAccountId);
+        if (!acc) return;
+
+        if (type === 'TRANSFER' && (!toAccountId || toAccountId === selectedAccountId)) {
+            alert("Please select a valid destination account.");
+            return;
+        }
+
+        const toAcc = type === 'TRANSFER' ? accounts.find(a => a.id === toAccountId) : undefined;
+
+        setIsSubmitting(true);
+        setTimeout(() => {
+            const txData = {
+                amount: parseFloat(amount),
+                type,
+                category: type === 'REFUND' ? 'Refunds' : type === 'TRANSFER' ? 'Transfer' : category,
+                accountId: acc.id,
+                accountName: acc.name,
+                toAccountId: toAcc?.id,
+                toAccountName: toAcc?.name,
+                date: new Date(date).toISOString(),
+                note: type === 'TRANSFER' ? 'Self Transfer' : note,
+                merchant: type === 'TRANSFER' ? 'Self' : note,
+                cashback: cashback ? parseFloat(cashback) : undefined
+            };
+
+            if (initialData) {
+              updateTransaction({ ...txData, id: initialData.id });
+            } else {
+              addTransaction(txData);
+            }
+            
+            setAmount('');
+            setNote('');
+            setCashback('');
+            setSuccess(true);
+            setIsSubmitting(false);
+            if (onComplete) onComplete();
+            setTimeout(() => setSuccess(false), 2000);
+        }, 500);
+    }
+
+    const getAccountIcon = (type: AccountType) => {
+        switch (type) {
+            case AccountType.BANK: return <Landmark size={20} />;
+            case AccountType.UPI: return <Smartphone size={20} />;
+            case AccountType.WALLET: return <Wallet size={20} />;
+            case AccountType.CASH: return <Banknote size={20} />;
+            case AccountType.CREDIT_CARD:
+            case AccountType.DEBIT_CARD:
+                return <CreditCard size={20} />;
+            default: return <Wallet size={20} />;
+        }
+    };
+
+    return (
+        <form onSubmit={handleSubmit} className="bg-white dark:bg-slate-900 p-6 rounded-3xl shadow-soft dark:shadow-none dark:border dark:border-slate-800 space-y-6">
+            <div>
+               <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Amount</label>
+               <div className="relative">
+                  <span className="absolute left-4 top-4 text-slate-400 font-bold">₹</span>
+                  <input 
+                    type="number" 
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    className="w-full pl-10 pr-4 py-4 rounded-xl bg-slate-50 dark:bg-slate-800 border-none outline-none text-xl font-bold text-slate-800 dark:text-white focus:ring-2 focus:ring-indigo-500"
+                    placeholder="0"
+                    required
+                  />
+               </div>
+            </div>
+
+            <div>
+               <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Date</label>
+               <input 
+                 type="date" 
+                 value={date}
+                 onChange={(e) => setDate(e.target.value)}
+                 className="w-full p-4 rounded-xl bg-slate-50 dark:bg-slate-800 border-none outline-none text-slate-800 dark:text-white font-medium"
+                 required
+               />
+            </div>
+
+            <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-xl overflow-x-auto no-scrollbar">
+               {['EXPENSE', 'INCOME', 'TRANSFER', 'REFUND'].map((t) => (
+                  <button
+                     key={t}
+                     type="button"
+                     onClick={() => setType(t as TransactionType)}
+                     className={`flex-1 min-w-[80px] py-2 text-[10px] font-bold rounded-lg transition-all ${
+                        type === t 
+                        ? (t === 'INCOME' || t === 'REFUND' ? 'bg-white dark:bg-slate-700 text-emerald-600 shadow-sm' 
+                           : t === 'TRANSFER' ? 'bg-white dark:bg-slate-700 text-blue-600 shadow-sm'
+                           : 'bg-white dark:bg-slate-700 text-rose-600 shadow-sm') 
+                        : 'text-slate-400'
+                     }`}
+                  >
+                     {t}
+                  </button>
+               ))}
+            </div>
+
+            <div>
+               <label className="block text-xs font-bold text-slate-400 uppercase mb-2">
+                   {type === 'TRANSFER' ? 'From Account' : 'Payment Method / Account'}
+               </label>
+               <div 
+                   ref={accountScrollRef}
+                   className="flex gap-3 overflow-x-auto no-scrollbar pb-2 cursor-grab active:cursor-grabbing"
+               >
+                   {accounts.map(acc => (
+                       <button
+                           key={acc.id}
+                           type="button"
+                           onClick={() => setSelectedAccountId(acc.id)}
+                           className={`relative min-w-[140px] p-4 rounded-2xl border text-left transition-all shrink-0 ${
+                               selectedAccountId === acc.id 
+                               ? 'border-indigo-600 bg-indigo-600 text-white shadow-lg shadow-indigo-200 dark:shadow-none' 
+                               : 'border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:border-indigo-300'
+                           }`}
+                       >
+                           <div className={`mb-3 w-8 h-8 rounded-full flex items-center justify-center ${selectedAccountId === acc.id ? 'bg-white/20' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`}>
+                               {getAccountIcon(acc.type)}
+                           </div>
+                           <p className={`text-xs font-bold mb-1 truncate ${selectedAccountId === acc.id ? 'text-white' : 'text-slate-800 dark:text-white'}`}>{acc.name}</p>
+                           <p className={`text-[10px] font-medium ${selectedAccountId === acc.id ? 'text-indigo-100' : 'text-slate-400'}`}>₹{acc.balance}</p>
+                           {selectedAccountId === acc.id && (
+                               <div className="absolute top-3 right-3 w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                           )}
+                       </button>
+                   ))}
+               </div>
+            </div>
+
+            {type === 'TRANSFER' && (
+                <div className="animate-in slide-in-from-top-2">
+                   <div className="flex justify-center -my-3 z-10 relative">
+                       <div className="bg-slate-100 dark:bg-slate-800 p-2 rounded-full border-4 border-white dark:border-slate-900">
+                           <ArrowRightLeft size={16} className="text-slate-400" />
+                       </div>
+                   </div>
+                   <label className="block text-xs font-bold text-slate-400 uppercase mb-2">To Account</label>
+                   <div 
+                       ref={toAccountScrollRef}
+                       className="flex gap-3 overflow-x-auto no-scrollbar pb-2 cursor-grab active:cursor-grabbing"
+                   >
+                       {accounts
+                            .filter(a => a.id !== selectedAccountId)
+                            .map(acc => (
+                           <button
+                               key={acc.id}
+                               type="button"
+                               onClick={() => setToAccountId(acc.id)}
+                               className={`relative min-w-[140px] p-4 rounded-2xl border text-left transition-all shrink-0 ${
+                                   toAccountId === acc.id 
+                                   ? 'border-indigo-600 bg-indigo-600 text-white shadow-lg shadow-indigo-200 dark:shadow-none' 
+                                   : 'border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:border-indigo-300'
+                               }`}
+                           >
+                               <div className={`mb-3 w-8 h-8 rounded-full flex items-center justify-center ${toAccountId === acc.id ? 'bg-white/20' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`}>
+                                   {getAccountIcon(acc.type)}
+                               </div>
+                               <p className={`text-xs font-bold mb-1 truncate ${toAccountId === acc.id ? 'text-white' : 'text-slate-800 dark:text-white'}`}>{acc.name}</p>
+                               <p className={`text-[10px] font-medium ${toAccountId === acc.id ? 'text-indigo-100' : 'text-slate-400'}`}>₹{acc.balance}</p>
+                               {toAccountId === acc.id && (
+                                   <div className="absolute top-3 right-3 w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                               )}
+                           </button>
+                       ))}
+                   </div>
+                </div>
+            )}
+
+            {type !== 'REFUND' && type !== 'TRANSFER' && (
+                <div>
+                   <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Category</label>
+                   <div className="grid grid-cols-4 gap-2">
+                      {CATEGORIES.filter(c => c.name !== 'Transfer').map(cat => (
+                         <button
+                            key={cat.name}
+                            type="button"
+                            onClick={() => setCategory(cat.name)}
+                            className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-all ${category === cat.name ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400' : 'border-transparent bg-slate-50 dark:bg-slate-800 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}
+                         >
+                            <span className="text-xl mb-1 flex items-center justify-center h-7">
+                                {cat.icon === 'Utensils' && '🍽️'}
+                                {cat.icon === 'ShoppingBasket' && '🛒'}
+                                {cat.icon === 'Plane' && '✈️'}
+                                {cat.icon === 'Receipt' && '🧾'}
+                                {cat.icon === 'ShoppingBag' && '🛍️'}
+                                {cat.icon === 'Fuel' && '⛽'}
+                                {cat.icon === 'Briefcase' && '💼'}
+                                {cat.icon === 'TrendingUp' && '📈'}
+                                {cat.icon === 'Monitor' && '📱'}
+                                {cat.icon === 'RefreshCcw' && '🔄'}
+                                {cat.icon === 'Coins' && '🪙'}
+                                {cat.icon === 'MoreHorizontal' && <MoreHorizontal size={20} />}
+                            </span>
+                            <span className="text-[9px] font-bold text-center leading-tight">{cat.name}</span>
+                         </button>
+                      ))}
+                   </div>
+                </div>
+            )}
+
+            {type !== 'TRANSFER' && (
+                <div>
+                   <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Description / Merchant</label>
+                   <input 
+                     type="text" 
+                     value={note}
+                     onChange={(e) => setNote(e.target.value)}
+                     className="w-full p-4 rounded-xl bg-slate-50 dark:bg-slate-800 border-none outline-none text-slate-800 dark:text-white font-medium"
+                     placeholder="e.g. Starbucks, Uber, Salary..."
+                     required
+                   />
+                </div>
+            )}
+
+            {type === 'EXPENSE' && (
+                <div>
+                   <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Cashback Received (Optional)</label>
+                   <div className="relative">
+                      <span className="absolute left-4 top-4 text-slate-400 font-bold">₹</span>
+                      <input 
+                        type="number" 
+                        value={cashback}
+                        onChange={(e) => setCashback(e.target.value)}
+                        className="w-full pl-10 pr-4 py-4 rounded-xl bg-purple-50 dark:bg-purple-900/10 border border-purple-100 dark:border-purple-900/30 outline-none font-bold text-purple-700 dark:text-purple-300 focus:ring-2 focus:ring-purple-500"
+                        placeholder="0"
+                      />
+                   </div>
+                </div>
+            )}
+
+            <div className="text-center pt-4">
+              <button 
+                type="submit" 
+                disabled={isSubmitting}
+                className={`w-full py-4 rounded-xl font-bold text-white shadow-glow transition-all active:scale-95 ${success ? 'bg-green-500' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+              >
+                {isSubmitting ? 'Saving...' : success ? (initialData ? 'Updated Successfully!' : 'Saved Successfully!') : (initialData ? 'Update Transaction' : 'Save Transaction')}
+              </button>
+            </div>
+        </form>
+    )
 }
