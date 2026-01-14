@@ -19,8 +19,8 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-// Fixed GlobalErrorBoundary to resolve Property 'state' and 'props' does not exist errors
-class GlobalErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+// Fixed GlobalErrorBoundary to resolve Property 'state' and 'props' does not exist errors by using React.Component inheritance explicitly
+class GlobalErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   public state: ErrorBoundaryState = { hasError: false };
 
   constructor(props: ErrorBoundaryProps) {
@@ -43,7 +43,7 @@ class GlobalErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySta
   }
 
   render() {
-    // Correctly accessing state property
+    // Correctly accessing state property inherited from React.Component
     if (this.state.hasError) {
       return (
         <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50 text-center">
@@ -69,7 +69,7 @@ class GlobalErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySta
         </div>
       );
     }
-    // Correctly accessing props property
+    // Correctly accessing props property via React.Component base class
     return this.props.children;
   }
 }
