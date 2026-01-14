@@ -51,6 +51,21 @@ export default function Dashboard() {
     }
   }, [isEditingName]);
 
+  // Handle horizontal scroll with mouse wheel for accounts
+  useEffect(() => {
+      const el = scrollContainerRef.current;
+      if (el) {
+          const onWheel = (e: WheelEvent) => {
+              if (e.deltaY !== 0) {
+                  e.preventDefault();
+                  el.scrollLeft += e.deltaY;
+              }
+          };
+          el.addEventListener('wheel', onWheel, { passive: false });
+          return () => el.removeEventListener('wheel', onWheel);
+      }
+  }, []);
+
   // Handle outside click for notifications
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
